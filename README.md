@@ -95,8 +95,12 @@ The controller attempts to release held keys when interrupted or stopped, helpin
 ## 📁 Project Structure
 
 ```text
-mh2-air-control/
-├── index.html       # Webcam interface and gesture recognition
+code/
+├──web App/ 
+|        ├── index.html       # Webcam interface and gesture recognition
+|        ├── scripy.js
+|        └── style.css
+| 
 ├── control.py       # Python keyboard controller
 └── README.md        # Project documentation
 ```
