@@ -7,8 +7,8 @@ from ctypes import wintypes
 
 
 FIREBASE_URL = (
-    "https://test-input-cd686-default-rtdb."
-    "asia-southeast1.firebasedatabase.app"
+    "http**************db."
+    "as*************base.app"
 )
 
 CONTROL_URL = FIREBASE_URL + "/control.json"
