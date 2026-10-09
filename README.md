@@ -1,4 +1,4 @@
-# MH2 Air Control 🎮
+# MH2 Air Control 
 
 **Gesture-Based PC Game Control Using Python, MediaPipe & Firebase**
 
@@ -8,24 +8,24 @@ The system translates recognized hand gestures into keyboard inputs, enabling ha
 
 ## ✨ Features
 
-- 🖐️ Real-time hand tracking using MediaPipe
-- 📷 Browser-based webcam interface
-- 🎮 Gesture-based keyboard control
-- 🔥 Firebase Realtime Database integration
-- 🐍 Python-powered Windows keyboard simulation
-- ⌨️ Windows `SendInput` API integration
-- ⚡ Scan-code keyboard input support
-- ↔️ Forward, backward, left, and right controls
-- 🎚️ Analog-style steering using configurable sensitivity
-- 🛑 Automatic key release when control data becomes stale
-- 🔄 Automatic Firebase reconnection
-- 🧵 Separate Firebase streaming and controller loops
-- 🔒 Thread-safe keyboard state management
-- ␣ Optional SPACE key control
-- 🧹 Keyboard cleanup on shutdown
-- 🌐 Browser-based control interface
+-  Real-time hand tracking using MediaPipe
+-  Browser-based webcam interface
+-  Gesture-based keyboard control
+-  Firebase Realtime Database integration
+-  Python-powered Windows keyboard simulation
+-  Windows `SendInput` API integration
+-  Scan-code keyboard input support
+-  Forward, backward, left, and right controls
+-  Analog-style steering using configurable sensitivity
+-  Automatic key release when control data becomes stale
+-  Automatic Firebase reconnection
+-  Separate Firebase streaming and controller loops
+-  Thread-safe keyboard state management
+-  Optional SPACE key control
+-  Keyboard cleanup on shutdown
+-  Browser-based control interface
 
-## 🛠️ Tech Stack
+##  Tech Stack
 
 | Technology | Purpose |
 |---|---|
@@ -39,7 +39,7 @@ The system translates recognized hand gestures into keyboard inputs, enabling ha
 | Windows `SendInput` | Simulated keyboard events |
 | `threading` | Background Firebase listener and controller synchronization |
 
-## 🖐️ Gesture Controls
+##  Gesture Controls
 
 | Hand Gesture | Command | Action |
 |---|---|---|
@@ -53,7 +53,7 @@ The system translates recognized hand gestures into keyboard inputs, enabling ha
 
 *Actual gesture mappings depend on the JavaScript implementation in `index.html`.*
 
-## 🎚️ Steering System
+##  Steering System
 
 MH2 Air Control supports analog-style steering through a normalized steering value.
 
@@ -105,7 +105,7 @@ code/
 └── README.md        # Project documentation
 ```
 
-## 🚀 Getting Started
+##  Getting Started
 
 ### 1. Requirements
 
@@ -259,7 +259,7 @@ Adjust these values carefully and test their effects with your specific browser 
 - Grant camera access only to trusted pages.
 - Review the permissions and security configuration before public deployment.
 
-## 🧑‍💻 Author
+##  Author
 
 **MH2 HRIDOY**
 - WhatsApp: +880 1962-388570
@@ -272,4 +272,4 @@ Choose and add a license file before publishing this project for reuse. The MIT 
 
 ---
 
-**MH2 Air Control** — Turning hand gestures into real-time PC game controls. 🚀
+**MH2 Air Control** — Turning hand gestures into real-time PC game controls. 
