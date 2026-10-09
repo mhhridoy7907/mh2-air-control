@@ -1,2 +1,90 @@
-<!--
-->
+<!-- index.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1,
+               user-scalable=no">
+<meta name="theme-color" content="#070b18">
+<title>MH2 AIR CONTROL</title>
+
+<link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+<div class="app">
+  <video id="video" autoplay playsinline muted></video>
+  <canvas id="canvas"></canvas>
+  <div class="shade"></div>
+
+  <div id="leftPoint" class="point" hidden></div>
+  <div id="rightPoint" class="point" hidden></div>
+
+  <header class="topbar">
+    <div>
+      <div class="brand">MH2 <span>AIR CONTROL</span></div>
+      <div class="subtitle">GESTURE RACING SYSTEM</div>
+    </div>
+    <div id="connection" class="connection">CAMERA OFF</div>
+  </header>
+
+  <main class="center-hud">
+    <div id="command" class="command">READY</div>
+    <div id="hint" class="hint">
+      Start the camera and show both hands
+    </div>
+
+    <div class="steering-panel">
+      <div class="steer-label">
+        <span>← LEFT</span>
+        <span id="steerValue">0%</span>
+        <span>RIGHT →</span>
+      </div>
+      <div class="steer-track">
+        <div class="steer-center"></div>
+        <div id="steerDot" class="steer-dot"></div>
+      </div>
+    </div>
+  </main>
+
+  <section class="bottom-panel">
+    <div class="gesture-grid">
+      <div class="gesture">
+        <div class="emoji">✊✊</div>
+        <b>ACCELERATE</b>
+        <small>Both fists</small>
+      </div>
+      <div class="gesture">
+        <div class="emoji">🖐️🖐️</div>
+        <b>BRAKE</b>
+        <small>Both open</small>
+      </div>
+      <div class="gesture">
+        <div class="emoji">↔️</div>
+        <b>STEER</b>
+        <small>Tilt hands</small>
+      </div>
+      <div class="gesture">
+        <div class="emoji">✊🖐️</div>
+        <b>SPACE</b>
+        <small>Mixed hands</small>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button id="start">▶ START CAMERA</button>
+      <button id="stop">■ STOP / RELEASE</button>
+    </div>
+
+    <div class="footer">
+      Keep both hands visible • Tilt gently for smooth steering
+    </div>
+  </section>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js"></script>
+
+<script src="script.js"></script>
+</body>
+</html>
