@@ -1,42 +1,60 @@
 
-import requests
-import json
-import time
 import ctypes
+import json
+import math
+import threading
+import time
 from ctypes import wintypes
 
+import requests
 
 FIREBASE_URL = (
-    "http**************db."
-    "as*************base.app"
+    "http**************************b."
+    "asi************irebasedatabase.app"
 )
-
 CONTROL_URL = FIREBASE_URL + "/control.json"
 
-user32 = ctypes.WinDLL("user32", use_last_error=True)
+RECONNECT_DELAY = 2.0
+STREAM_READ_TIMEOUT = 40
+STALE_TIMEOUT = 0.8
+TICK_INTERVAL = 0.004
+
+STEERING_DEADZONE = 0.06
+STEERING_FULL = 0.90
+STEERING_PWM_PERIOD = 0.12
+STEERING_MIN_DUTY = 0.20
+
+USE_SCANCODE = True
 
 VK_UP = 0x26
 VK_DOWN = 0x28
 VK_LEFT = 0x25
 VK_RIGHT = 0x27
+VK_SPACE = 0x20
 
-INPUT_KEYBOARD = 1
-KEYEVENTF_KEYUP = 0x0002
-KEYEVENTF_EXTENDEDKEY = 0x0001
+ALL_KEYS = (VK_UP, VK_DOWN, VK_LEFT, VK_RIGHT, VK_SPACE)
 
-RECONNECT_DELAY = 2
-REQUEST_TIMEOUT = 30
-
-KEY_MAP = {
-    "UP": VK_UP,
-    "DOWN": VK_DOWN,
-    "LEFT": VK_LEFT,
-    "RIGHT": VK_RIGHT,
+KEY_NAMES = {
+    VK_UP: "UP",
+    VK_DOWN: "DOWN",
+    VK_LEFT: "LEFT",
+    VK_RIGHT: "RIGHT",
+    VK_SPACE: "SPACE",
 }
 
-held_keys = set()
-current_command = "NONE"
+EXTENDED_KEYS = {VK_UP, VK_DOWN, VK_LEFT, VK_RIGHT}
 
+INPUT_KEYBOARD = 1
+KEYEVENTF_EXTENDEDKEY = 0x0001
+KEYEVENTF_KEYUP = 0x0002
+KEYEVENTF_SCANCODE = 0x0008
+MAPVK_VK_TO_VSC = 0
+
+VALID_COMMANDS = ("UP", "DOWN", "LEFT", "RIGHT", "NONE")
+
+user32 = ctypes.WinDLL("user32", use_last_error=True)
+kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+winmm = ctypes.WinDLL("winmm")
 
 
 class KEYBDINPUT(ctypes.Structure):
@@ -90,207 +108,353 @@ user32.SendInput.argtypes = (
 )
 user32.SendInput.restype = wintypes.UINT
 
+user32.MapVirtualKeyW.argtypes = (wintypes.UINT, wintypes.UINT)
+user32.MapVirtualKeyW.restype = wintypes.UINT
 
-def send_key_event(vk, key_up=False):
-    flags = KEYEVENTF_EXTENDEDKEY
+lock = threading.RLock()
+stop_event = threading.Event()
 
-    if key_up:
+state = {"key": "NONE", "steering": 0.0, "space": False}
+last_packet_at = 0.0
+held = set()
+scan_cache = {}
+last_log = None
+
+HANDLER_TYPE = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.DWORD)
+console_handler_ref = None
+
+
+def scan_code(vk):
+    if vk not in scan_cache:
+        scan_cache[vk] = user32.MapVirtualKeyW(vk, MAPVK_VK_TO_VSC)
+    return scan_cache[vk]
+
+
+def send_key(vk, release=False):
+    flags = 0
+
+    if USE_SCANCODE:
+        flags |= KEYEVENTF_SCANCODE
+
+    if vk in EXTENDED_KEYS:
+        flags |= KEYEVENTF_EXTENDEDKEY
+
+    if release:
         flags |= KEYEVENTF_KEYUP
 
     event = INPUT()
     event.type = INPUT_KEYBOARD
     event.union.ki = KEYBDINPUT(
         wVk=vk,
-        wScan=0,
+        wScan=scan_code(vk),
         dwFlags=flags,
         time=0,
         dwExtraInfo=0,
     )
 
-    ctypes.set_last_error(0)
+    result = user32.SendInput(1, ctypes.byref(event), ctypes.sizeof(INPUT))
 
-    sent = user32.SendInput(
-        1,
-        ctypes.byref(event),
-        ctypes.sizeof(INPUT),
-    )
-
-    if sent != 1:
+    if result != 1:
         print(
-            f"[INPUT ERROR] Windows error: "
-            f"{ctypes.get_last_error()}"
+            f"[INPUT ERROR] {KEY_NAMES[vk]} "
+            f"Windows error={ctypes.get_last_error()}"
         )
         return False
 
     return True
 
 
-def key_down(vk):
-    return send_key_event(vk, False)
+def sync_keys(desired):
+    with lock:
+        for vk in list(held - desired):
+            if send_key(vk, release=True):
+                held.discard(vk)
+
+        for vk in desired - held:
+            if send_key(vk):
+                held.add(vk)
 
 
-def key_up(vk):
-    return send_key_event(vk, True)
+def release_all(force=False):
+    with lock:
+        targets = set(ALL_KEYS) if force else set(held)
+
+        for vk in targets:
+            if send_key(vk, release=True):
+                held.discard(vk)
+
+        if force:
+            held.clear()
 
 
+def neutral_state():
+    global last_packet_at
 
-def release_all_keys():
-    global held_keys, current_command
-
-    for vk in list(held_keys):
-        key_up(vk)
-
-    held_keys.clear()
-    current_command = "NONE"
-    print("[RELEASE] All keys")
+    with lock:
+        state["key"] = "NONE"
+        state["steering"] = 0.0
+        state["space"] = False
+        last_packet_at = 0.0
 
 
-
-def set_key(command):
-    global held_keys, current_command
-
-    command = str(command).strip().upper()
-
-    desired_commands = {
-        "UP": {"UP"},
-        "DOWN": {"DOWN"},
-        "LEFT": {"UP", "LEFT"},
-        "RIGHT": {"UP", "RIGHT"},
-        "NONE": set(),
-    }
-
-    if command not in desired_commands:
-        print(f"[INVALID COMMAND] {command}")
-        return
-
-    wanted = {
-        KEY_MAP[name]
-        for name in desired_commands[command]
-    }
-
-    for vk in held_keys - wanted:
-        if key_up(vk):
-            print(f"[KEY UP] {vk}")
-
-    for vk in wanted - held_keys:
-        if key_down(vk):
-            print(f"[KEY DOWN] {vk}")
-
-    held_keys = wanted
-    current_command = command
-
-    names = [
-        name for name, vk in KEY_MAP.items()
-        if vk in held_keys
-    ]
-
-    print(f"[COMMAND] {command} | HOLD: {names}")
+def parse_key(value):
+    key = str(value or "NONE").upper().strip()
+    return key if key in VALID_COMMANDS else "NONE"
 
 
+def parse_steering(value):
+    try:
+        number = float(value or 0)
+    except (ValueError, TypeError, OverflowError):
+        return 0.0
 
-def handle_firebase_event(event_type, payload):
-    if event_type not in ("put", "patch"):
-        return
+    if not math.isfinite(number):
+        return 0.0
 
-    if not isinstance(payload, dict):
-        return
+    return max(-1.0, min(1.0, number))
 
+
+def parse_space(value):
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "on")
+
+    return bool(value)
+
+
+def merge_state(data):
+    global last_packet_at
+
+    with lock:
+        if "key" in data:
+            state["key"] = parse_key(data["key"])
+
+        if "steering" in data:
+            state["steering"] = parse_steering(data["steering"])
+
+        if "space" in data:
+            state["space"] = parse_space(data["space"])
+
+        last_packet_at = time.monotonic()
+
+
+def replace_state(data):
+    with lock:
+        state["key"] = "NONE"
+        state["steering"] = 0.0
+        state["space"] = False
+
+    merge_state(data)
+
+
+def handle_payload(event_type, payload):
     path = payload.get("path", "/")
-    value = payload.get("data")
+    data = payload.get("data")
 
     if path == "/":
-        if isinstance(value, dict):
-            set_key(value.get("key", "NONE"))
+        if isinstance(data, dict):
+            if event_type == "put":
+                replace_state(data)
+            else:
+                merge_state(data)
+        elif event_type == "put":
+            neutral_state()
+    elif path in ("/key", "/steering", "/space"):
+        merge_state({path[1:]: data})
 
-    elif path == "/key":
-        set_key(value)
 
-    elif isinstance(value, dict) and "key" in value:
-        set_key(value["key"])
-
-
-def firebase_stream():
+def stream_once():
     headers = {
         "Accept": "text/event-stream",
         "Cache-Control": "no-cache",
     }
 
-    print("=" * 50)
-    print("          MH2 AIR CONTROL")
-    print("=" * 50)
-    print("UP    = Forward")
-    print("DOWN  = Backward")
-    print("LEFT  = Forward + Left")
-    print("RIGHT = Forward + Right")
-    print("NONE  = Release all keys")
-    print(f"INPUT size: {ctypes.sizeof(INPUT)}")
-    print("Press Ctrl+C to stop.")
-    print()
+    with requests.get(
+        CONTROL_URL,
+        headers=headers,
+        stream=True,
+        timeout=(10, STREAM_READ_TIMEOUT),
+    ) as response:
+        response.raise_for_status()
+        print("[Firebase] Connected")
 
-    while True:
+        event_type = None
+        snapshot_pending = True
+
+        for raw_line in response.iter_lines(chunk_size=1):
+            if stop_event.is_set():
+                return
+
+            if not raw_line:
+                continue
+
+            line = raw_line.decode("utf-8", "replace").strip()
+
+            if line.startswith("event:"):
+                event_type = line[6:].strip()
+                continue
+
+            if not line.startswith("data:"):
+                continue
+
+            current_event = event_type
+            event_type = None
+
+            if current_event in ("cancel", "auth_revoked"):
+                raise RuntimeError(f"Stream closed by server: {current_event}")
+
+            if current_event not in ("put", "patch"):
+                continue
+
+            try:
+                payload = json.loads(line[5:].strip())
+            except json.JSONDecodeError:
+                continue
+
+            if not isinstance(payload, dict):
+                continue
+
+            if snapshot_pending and current_event == "put":
+                snapshot_pending = False
+                neutral_state()
+                continue
+
+            handle_payload(current_event, payload)
+
+
+def stream_worker():
+    while not stop_event.is_set():
         try:
-            with requests.get(
-                CONTROL_URL,
-                headers=headers,
-                stream=True,
-                timeout=(10, REQUEST_TIMEOUT),
-            ) as response:
+            neutral_state()
+            release_all()
+            stream_once()
 
-                response.raise_for_status()
-                print("[Firebase] Connected")
-
-                event_type = None
-
-                for raw_line in response.iter_lines(
-                    decode_unicode=True
-                ):
-                    if raw_line is None:
-                        continue
-
-                    line = raw_line.strip()
-
-                    if not line:
-                        continue
-
-                    if line.startswith("event:"):
-                        event_type = line[6:].strip()
-
-                    elif line.startswith("data:"):
-                        try:
-                            payload = json.loads(
-                                line[5:].strip()
-                            )
-                        except json.JSONDecodeError:
-                            continue
-
-                        handle_firebase_event(
-                            event_type,
-                            payload,
-                        )
-
-        except KeyboardInterrupt:
-            print("\n[STOP] Keyboard interrupt")
-            break
-
+            if not stop_event.is_set():
+                print("[Firebase] Stream ended")
         except requests.exceptions.RequestException as error:
             print(f"[Firebase ERROR] {error}")
-            release_all_keys()
-            time.sleep(RECONNECT_DELAY)
-
         except Exception as error:
             print(f"[ERROR] {error}")
-            release_all_keys()
-            time.sleep(RECONNECT_DELAY)
 
+        neutral_state()
+        release_all()
+        stop_event.wait(RECONNECT_DELAY)
+
+
+def steering_pressed(magnitude, now):
+    if magnitude < STEERING_DEADZONE:
+        return False
+
+    if magnitude >= STEERING_FULL:
+        return True
+
+    duty = (magnitude - STEERING_DEADZONE) / (
+        STEERING_FULL - STEERING_DEADZONE
+    )
+    duty = max(STEERING_MIN_DUTY, min(1.0, duty))
+
+    return (now % STEERING_PWM_PERIOD) < duty * STEERING_PWM_PERIOD
+
+
+def compute_desired(now):
+    with lock:
+        command = state["key"]
+        steering = state["steering"]
+        space = state["space"]
+        age = now - last_packet_at
+
+    desired = set()
+
+    if last_packet_at == 0.0 or age > STALE_TIMEOUT:
+        return desired, "NONE", 0.0, False
+
+    if command == "UP":
+        desired.add(VK_UP)
+    elif command == "DOWN":
+        desired.add(VK_DOWN)
+
+    if command == "LEFT":
+        steering = 1.0
+    elif command == "RIGHT":
+        steering = -1.0
+
+    if steering_pressed(abs(steering), now):
+        desired.add(VK_LEFT if steering > 0 else VK_RIGHT)
+
+    if space:
+        desired.add(VK_SPACE)
+
+    return desired, command, steering, space
+
+
+def log_change(command, steering, space):
+    global last_log
+
+    with lock:
+        names = tuple(
+            KEY_NAMES[vk] for vk in ALL_KEYS if vk in held
+        )
+
+    summary = (command, round(steering, 2), space)
+
+    if summary != last_log:
+        last_log = summary
+        print(
+            f"[CONTROL] {command} | STEER={steering:+.2f} | "
+            f"SPACE={space} | HOLD={list(names)}"
+        )
+
+
+def controller_loop():
+    while not stop_event.is_set():
+        now = time.monotonic()
+        desired, command, steering, space = compute_desired(now)
+
+        sync_keys(desired)
+        log_change(command, steering, space)
+
+        stop_event.wait(TICK_INTERVAL)
+
+
+def console_handler(event):
+    stop_event.set()
+    release_all(force=True)
+    return False
+
+
+def install_console_handler():
+    global console_handler_ref
+
+    console_handler_ref = HANDLER_TYPE(console_handler)
+    kernel32.SetConsoleCtrlHandler(console_handler_ref, True)
+
+
+def main():
+    print("=" * 48)
+    print("          MH2 AIR CONTROL")
+    print("=" * 48)
+    print("Both fists      = UP (accelerate)")
+    print("Both open hands = DOWN (brake)")
+    print("Tilt hands      = LEFT / RIGHT")
+    print("Mixed hands     = SPACE")
+    print("Ctrl+C          = Stop")
+    print()
+
+    install_console_handler()
+    winmm.timeBeginPeriod(1)
+
+    worker = threading.Thread(target=stream_worker, daemon=True)
+    worker.start()
+
+    try:
+        controller_loop()
+    except KeyboardInterrupt:
+        print("\n[STOP] Keyboard interrupt")
+    finally:
+        stop_event.set()
+        release_all(force=True)
+        winmm.timeEndPeriod(1)
+        print("[EXIT] All keys released.")
 
 
 if __name__ == "__main__":
-    try:
-        firebase_stream()
-
-    except KeyboardInterrupt:
-        print("\nStopped.")
-
-    finally:
-        release_all_keys()
-        print("[EXIT] All keys released.")
+    main()
