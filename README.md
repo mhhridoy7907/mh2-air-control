@@ -258,9 +258,9 @@ Adjust these values carefully and test their effects with your specific browser 
 ## 🧑‍💻 Author
 
 **MH2 HRIDOY**
-
-- GitHub: [@mhhridoy7907](https://github.com/mhhridoy7907)
+- WhatsApp: +880 1962-388570
 - Portfolio: [mh2-hridoy.web.app](https://mh2-hridoy.web.app)
+- Gmail: mhhridoy7907@gmail.com
 
 ## 📄 License
 
